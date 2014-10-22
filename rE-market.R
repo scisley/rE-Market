@@ -4,29 +4,30 @@ require(ggthemes)
 require(reshape)
 
 # TODO:
-#  * Make name, push to git. rE-Market
+#  * DONE. Make name, push to git. rE-Market
 #  * Implement 4 component government welfare function
+#  * Find somebody at NREL to talk with about who can profit from a carbon tax
 #  * Test welfare function
 #  * Examine how much nuclear and hydro can take advantage of market prices (IPP's?)
 #  * Learn multi-core package
 #  * Do large LHC experiment using AWS big computer
 
 
+#  * Make a profit by plant map and export the data for viewing in javascript
+
 # Remember traceback!  Helps with debugging!
 theme_set(theme_gdocs())
 theme_update(plot.background = element_blank()) #, text = element_text(size=14))
 #theme_update(legend.key.width=unit(3,"lines"))
 
-# The DOE produced is scaled from 0 to 1, so first I need to scale those to my actual
-# parameter ranges
-setwd("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\Analysis")
-source('EmpiricalAnalysisFunctions5.R')
-source('EmpiricalAnalysisPlots5.R')
+setwd("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\rE-market")
+source('rE-support.R')
+source('rE-plots.R')
 options(digits=10)
 ######################### ANALYSIS ###########################
 
 elasticity <- -1
-pd <- getPlantData("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\Analysis\\New_Plant_Data.csv")
+pd <- getPlantData("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\rE-market\\New_Plant_Data.csv")
 owner.column <- 'FuelAgg'
 
 if (is.factor(pd[[owner.column]])) {
@@ -54,6 +55,51 @@ profitByOwnerPlot(industry, all.lobbies) + scale_color_manual(values=fuel.cols)
 
 system.time( cont.pac.ramp5 <- calcAggContributions(industry, all.lobbies, gov) )
 makeIndustryDiagnosticPlots(industry, gov, all.lobbies)
+
+
+
+
+#### Is the government welfare function working? #####
+pc.seq <- seq(0,100,length=50)
+industry <- makeNercIndustry(pd, load.data, elasticity=-0.1, owner.column=owner.column)
+
+# Return a list of government welfare for a supplied pc.seq and industry structure
+govWelfareVector <- function(industry, gov, pc.seq) {
+  p.clear <- lapply(pc.seq, industry[['clearingPrices']])
+  
+  # Government welfare
+  gov.welfare <- mapply(function(x,y) gov(x, industry, y), pc.seq, p.clear)
+  #gov.welfare <- gov.welfare - min(gov.welfare) # Shift to min zero
+  return(gov.welfare)
+}
+
+# weights in componentGov go as: scc, spike, revenue, production
+components <-            c('SCC',              'Spike',              'Revenue',           'Production');
+component.values <- list(c(25, 50, 75, 150), c(0.5,0.75,1.0,1.25), c(0.5,0.75,1.0,1.25), c(0.5,0.75,1.0,1.25))
+
+# This loops through the components and the values I want to test above and makes a plot showing how the
+# government welfare changes for the different specifications as pc changes. This should highlight any
+# blatant errrors. Note that the industry elasticity is important, as well as the default values
+# used for the other components.
+for (i in 1:4) {
+  
+  gov.results <- as.data.frame(lapply(component.values[[i]], function(x) {
+    weights <- c(50,0.5,1,1);
+    weights[i] <- x;
+    gov <- componentGov(weights)
+    return(govWelfareVector(industry, gov, pc.seq=pc.seq))
+  }))
+  
+  colnames(gov.results) <- component.values[[i]]
+  gov.results$pc <- pc.seq
+  
+  gov.results <- melt(gov.results, id=c("pc"), variable_name=components[i]) 
+  
+  print(ggplot(gov.results, aes(x=pc, y=value)) + geom_line(size=1, aes_string(color=components[i])) + scale_color_grey() +
+    ggtitle(paste('Government Welfare for various',components[i])))
+}
+
+
 
 
 
