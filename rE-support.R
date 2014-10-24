@@ -195,7 +195,7 @@ makeLoadSegment <- function(owner.names, plants, demand, name='Segment', ramp=0.
               name = name))
 }
 
-# Make an industry object that has one sub-industry for each load duration group
+# Make a sector object that has one sub-sector for each load duration group
 assembleSector <- function(load.segments, t.weights=rep(1,length(load.segments)), name='Sector') {
   
   n <- length(load.segments)
@@ -486,7 +486,7 @@ componentGov <- function(weights) {
     p.0 <- industry$no.tax.values$price # pre-computed, no penalty
     s.0 <- industry$no.tax.values$supply # pre-computed, no penalty
     t.w <- industry$sector.weights
-    s   <- industry$sectorSegmentSupply(p.list, scc)
+    s   <- industry$sectorSegmentSupply(p.list, pc)
     
     emissions <- industry$emissions(p.list, pc)
     revenue <- emissions*pc
@@ -494,16 +494,16 @@ componentGov <- function(weights) {
     spike.loss <- calcSpikeLoss(p.0, p.list, s.0)
     production.loss <- calcProductionLoss(p.0, s, s.0)
     return(-scc*emissions + revenue.weight*revenue
-           -spike.weight*spike.loss + production.weight*production.loss)
+           -spike.weight*spike.loss - production.weight*production.loss)
   }
 
 }
 
-calcProductionLoss <- function(p.0, p, s.0) {
+calcProductionLoss <- function(p.0, s, s.0) {
   # Looks weird, for each sector i, find revenue lost by industry due to the carbon price
   # and add it all up. The interior sum is over load segments, the outer sum is over sectors.
-  #sum(sapply(1:length(p.0), function(i) sum(p.0[[i]]*(s.0[[i]]-s[[i]]))))
-  return(0)
+  sum(sapply(1:length(p.0), function(i) sum(p.0[[i]]*(s.0[[i]]-s[[i]]))))
+  #return(0)
 }
 
 calcSpikeLoss <- function(p.0, p, s.0) {

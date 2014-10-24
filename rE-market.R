@@ -5,9 +5,9 @@ require(reshape)
 
 # TODO:
 #  * DONE. Make name, push to git. rE-Market
-#  * Implement 4 component government welfare function
+#  * DONE. Implement 4 component government welfare function
 #  * Find somebody at NREL to talk with about who can profit from a carbon tax
-#  * Test welfare function
+#  * DONE. Test welfare function
 #  * Examine how much nuclear and hydro can take advantage of market prices (IPP's?)
 #  * Learn multi-core package
 #  * Do large LHC experiment using AWS big computer
@@ -26,6 +26,8 @@ source('rE-plots.R')
 options(digits=10)
 ######################### ANALYSIS ###########################
 
+
+#### Analysis using Fuel Type as owners #####
 elasticity <- -1
 pd <- getPlantData("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\rE-market\\New_Plant_Data.csv")
 owner.column <- 'FuelAgg'
@@ -48,20 +50,48 @@ load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","
 load.groups <- c(0, 1) # one load segment
 
 industry <- makeNercIndustry(pd, load.data, elasticity, owner.column=owner.column)
-
 gov <- componentGov(weights=c(50,1,0,0))
 
-profitByOwnerPlot(industry, all.lobbies) + scale_color_manual(values=fuel.cols)
+#profitByOwnerPlot(industry, all.lobbies) + scale_color_manual(values=fuel.cols)
 
+# Time how long it takes to compute contributions
 system.time( cont.pac.ramp5 <- calcAggContributions(industry, all.lobbies, gov) )
-makeIndustryDiagnosticPlots(industry, gov, all.lobbies)
+
+
+#### Analysis using Owners ####
+
+elasticity <- -1
+pd <- getPlantData("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\rE-market\\New_Plant_Data.csv")
+
+# Exclude from lobbies the trade groups
+all.lobbies <- exclude(unique(pd$ParentPAC), c('None','American Public Power Assn','Edison Electric Institute'))
+
+# Generate some load curves
+load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","#N/A","?"), stringsAsFactors=FALSE)
+# Splits the load curve up into 4 groupings, with small ranges on the ends
+#load.groups <- c(0, seq(0.01,0.98,length=3), 1)
+load.groups <- c(0, 1) # one load segment
+
+industry <- makeNercIndustry(pd, load.data, elasticity, owner.column=owner.column)
+gov <- componentGov(weights=c(50,1,1,1))
+
+#profitByOwnerPlot(industry, all.lobbies)
+
+# Time how long it takes to compute contributions
+system.time( cont.pac.ramp5 <- calcAggContributions(industry, all.lobbies, gov) )
+
+
+
+
 
 
 
 
 #### Is the government welfare function working? #####
 pc.seq <- seq(0,100,length=50)
-industry <- makeNercIndustry(pd, load.data, elasticity=-0.1, owner.column=owner.column)
+industry <- makeNercIndustry(pd, load.data, elasticity=-1, owner.column=owner.column)
+
+makeIndustryDiagnosticPlots(industry, gov, all.lobbies, pc.seq=pc.seq)
 
 # Return a list of government welfare for a supplied pc.seq and industry structure
 govWelfareVector <- function(industry, gov, pc.seq) {
@@ -81,10 +111,11 @@ component.values <- list(c(25, 50, 75, 150), c(0.5,0.75,1.0,1.25), c(0.5,0.75,1.
 # government welfare changes for the different specifications as pc changes. This should highlight any
 # blatant errrors. Note that the industry elasticity is important, as well as the default values
 # used for the other components.
+default.weights <- c(25, 1, 1, 1)
 for (i in 1:4) {
   
   gov.results <- as.data.frame(lapply(component.values[[i]], function(x) {
-    weights <- c(50,0.5,1,1);
+    weights <- default.weights
     weights[i] <- x;
     gov <- componentGov(weights)
     return(govWelfareVector(industry, gov, pc.seq=pc.seq))
@@ -101,13 +132,13 @@ for (i in 1:4) {
 
 
 
-
-
-
-
-
-
-
+### Debugging code
+#p.clear <- lapply(pc.seq, industry$clearingPrices)
+#outcome <- mapply(function(x,y) as.numeric(industry$sectorSegmentSupply(x,y)), p.clear, pc.seq)
+#
+#sum(sapply(1:length(p.0), function(i) 
+#              sum(p.0[[i]]*
+#              (industry$no.tax.values$supply[[i]]-industry$sectorSegmentSupply(p.clear[[50]], pc=100)[[i]]))))
 
 
 
