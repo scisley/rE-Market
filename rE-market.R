@@ -2,6 +2,8 @@ rm(list=ls(all=TRUE))
 require(ggplot2)
 require(ggthemes)
 require(reshape)
+require(parallel)
+require(tgp)
 
 # TODO:
 #  * DONE. Make name, push to git. rE-Market
@@ -11,7 +13,7 @@ require(reshape)
 #  * Examine how much nuclear and hydro can take advantage of market prices (IPP's?)
 #  * Learn multi-core package
 #  * Do large LHC experiment using AWS big computer
-
+#  * Make a new dispatch curve with histograms/kernels underneath for fuel types for b/w readers
 
 #  * Make a profit by plant map and export the data for viewing in javascript
 
@@ -24,6 +26,10 @@ setwd("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\rE-market")
 source('rE-support.R')
 source('rE-plots.R')
 options(digits=10)
+
+# Bucket to put the final file
+s3.bucket <- 's3://isley-model-results/'
+
 ######################### ANALYSIS ###########################
 
 
@@ -61,7 +67,7 @@ system.time( cont.pac.ramp5 <- calcAggContributions(industry, all.lobbies, gov) 
 #### Analysis using Owners ####
 
 elasticity <- -1
-pd <- getPlantData("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\rE-market\\New_Plant_Data.csv")
+pd <- getPlantData("New_Plant_Data.csv")
 
 # Exclude from lobbies the trade groups
 all.lobbies <- exclude(unique(pd$ParentPAC), c('None','American Public Power Assn','Edison Electric Institute'))
@@ -72,7 +78,7 @@ load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","
 #load.groups <- c(0, seq(0.01,0.98,length=3), 1)
 load.groups <- c(0, 1) # one load segment
 
-industry <- makeNercIndustry(pd, load.data, elasticity, owner.column=owner.column)
+industry <- makeNercIndustry(pd, load.data, elasticity, owner.column='ParentPAC')
 gov <- componentGov(weights=c(50,1,1,1))
 
 #profitByOwnerPlot(industry, all.lobbies)
@@ -81,13 +87,82 @@ gov <- componentGov(weights=c(50,1,1,1))
 system.time( cont.pac.ramp5 <- calcAggContributions(industry, all.lobbies, gov) )
 
 
+#### Generate the Latin Hypercube sample
+
+{ ## Create the Latin hypercube experimental design and save it to a file.
+  num.samples <- 4000
+  ranges <- data.frame(min=c(0, 0, 0, 0, -1), max=c(75, 1.5, 1.5, 1.5, -0.1))
+  sample <- as.data.frame(lhs(num.samples, as.matrix(ranges)))
+  names(sample) <- c('alpha.scc', 'alpha.spike', 'alpha.revenue', 'alpha.production', 'elasticity')
+  save(sample, file='eaLhc.RData')
+}
+
+# Prepare for running the LHC sample
+load(file='eaLhc.RData')
+pd <- getPlantData("New_Plant_Data.csv")
+# Exclude from lobbies the trade groups
+all.lobbies <- exclude(unique(pd$ParentPAC), c('None','American Public Power Assn','Edison Electric Institute'))
+# Generate some load curves
+load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","#N/A","?"), stringsAsFactors=FALSE)
+# Splits the load curve up into 4 groupings, with small ranges on the ends
+#load.groups <- c(0, seq(0.01,0.98,length=3), 1)
+load.groups <- c(0, 1) # one load segment
+
+# Define the function to run for each row of the LHC
+run <- function(alpha.scc, alpha.spike, alpha.revenue, alpha.production, elasticity, i) {
+  
+  industry <- makeNercIndustry(pd, load.data, elasticity, owner.column='ParentPAC')
+  gov <- componentGov(weights=c(alpha.scc, alpha.spike, alpha.revenue, alpha.production))
+  
+  system.time( cont.x <- calcAggContributions(industry, all.lobbies, gov) )
+  
+  list(cont=cont.x, alpha.scc=alpha.scc, alpha.spike=alpha.spike, 
+       alpha.revenue=alpha.revenue, alpha.production=alpha.production, 
+       elasticity=elasticity, i=i)
+}
+
+# Simple function to checkpoint data out to S3 storage
+save_data <- function(ans, i) {
+  file.name <- paste('lhcResults',i,'.RData',sep='')
+  save(ans, sample, file=file.name)
+  system(paste('aws s3 cp', file.name, s3.bucket), wait=TRUE)
+}
+
+# Perform the experiment, but do it in chunks so we can checkpoint every 200 runs
+for (count in 1:20) {
+  end.i <- count*200
+  start.i <- end.i-200+1
+  #results <- mclapply(start.i:end.i, function(x) { CHANGE LOAD!
+  results <- mclapply(1:4, function(i) {
+    result <- run(sample[i,'alpha.scc'], sample[i,'alpha.spike'], sample[i,'alpha.revenue'],
+                  sample[i,'alpha.production'], sample[i,'elasticity'], i)
+    print(paste('Finished with run',i))
+    return(result)
+  }, mc.cores = 32)
+  
+  save_data(results, count)
+}
+
+# DONE!
 
 
 
 
 
 
-#### Is the government welfare function working? #####
+
+
+
+
+
+
+
+
+
+
+
+
+#### Diagnostic plots for Government Welfare #####
 pc.seq <- seq(0,100,length=50)
 industry <- makeNercIndustry(pd, load.data, elasticity=-1, owner.column=owner.column)
 
