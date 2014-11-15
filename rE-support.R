@@ -441,8 +441,9 @@ calcAggContributions <- function(industry, lobby.names, gov) {
   
 }
 
-# Industry is an industry object, NOT a list of sectors like before
-aggNegotiate <- function(industry, lobbyers, gov) { 
+# rough.pc determines the points where the welfare is initially evaluated. The highest point
+# and its neighbors are then used as the starting point and limits for a Brent optimization.
+aggNegotiate <- function(industry, lobbyers, gov, rough.pc = seq(0, 150, length=100)) { 
 
   n <- length(industry$sectors)
 
@@ -452,9 +453,8 @@ aggNegotiate <- function(industry, lobbyers, gov) {
     lobby.profit <- sum(unlist(industry$profitByOwners(p.list, pc, lobbyers)))
     lobby.profit + gov(pc, industry, p.list)
   }
-
-  eps <- 0
-  rough.pc <- seq(eps, 50-eps, length=500) # Tried 1000, didn't improve results much
+  
+  #rough.pc <- seq(search.range[1], search.range[2], length=ini.density) # Tried 1000, didn't improve results much
   rough.welfare <- sapply(rough.pc, welfare)
   rough.pc.max.i <- which.max(rough.welfare)
   lbound <- rough.pc[max(1, rough.pc.max.i-1)]
@@ -535,7 +535,7 @@ exclude <- function(char.vect, drop) {
 }
 
 # Returns an industry object based on the NERC regions, minus Alaska and Hawaii
-makeNercIndustry <- function(pd, load.data, elasticity, ramp=5, load.groups = c(0,1), owner.column='ParentPAC') {
+makeNercIndustry <- function(pd, load.data, load.groups = c(0,1), elasticity=-1, ramp=0.5, owner.column='ParentPAC') {
   
   t.weights <- load.groups[-1]-load.groups[-length(load.groups)]
   nerc.regions <- unique(pd$NERC)

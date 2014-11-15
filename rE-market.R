@@ -55,7 +55,8 @@ load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","
 #load.groups <- c(0, seq(0.01,0.98,length=3), 1)
 load.groups <- c(0, 1) # one load segment
 
-industry <- makeNercIndustry(pd, load.data, elasticity, owner.column=owner.column)
+industry <- makeNercIndustry(pd, load.data, load.groups, elasticity, ramp=3, owner.column=owner.column)
+  
 gov <- componentGov(weights=c(50,1,0,0))
 
 #profitByOwnerPlot(industry, all.lobbies) + scale_color_manual(values=fuel.cols)
@@ -78,7 +79,8 @@ load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","
 #load.groups <- c(0, seq(0.01,0.98,length=3), 1)
 load.groups <- c(0, 1) # one load segment
 
-industry <- makeNercIndustry(pd, load.data, elasticity, owner.column='ParentPAC')
+industry <- makeNercIndustry(pd, load.data, load.groups, elasticity, ramp=3, owner.column='ParentPAC')
+
 gov <- componentGov(weights=c(50,1,1,1))
 
 #profitByOwnerPlot(industry, all.lobbies)
@@ -105,13 +107,13 @@ all.lobbies <- exclude(unique(pd$ParentPAC), c('None','American Public Power Ass
 # Generate some load curves
 load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","#N/A","?"), stringsAsFactors=FALSE)
 # Splits the load curve up into 4 groupings, with small ranges on the ends
-#load.groups <- c(0, seq(0.01,0.98,length=3), 1)
-load.groups <- c(0, 1) # one load segment
+load.groups <- c(0, seq(0.01,0.98,length=3), 1)
+#load.groups <- c(0, 1) # one load segment
 
 # Define the function to run for each row of the LHC
 run <- function(alpha.scc, alpha.spike, alpha.revenue, alpha.production, elasticity, i) {
   
-  industry <- makeNercIndustry(pd, load.data, elasticity, owner.column='ParentPAC')
+  industry <- makeNercIndustry(pd, load.data, load.groups, elasticity, ramp=0.5, owner.column='ParentPAC')
   gov <- componentGov(weights=c(alpha.scc, alpha.spike, alpha.revenue, alpha.production))
   
   system.time( cont.x <- calcAggContributions(industry, all.lobbies, gov) )
@@ -120,6 +122,13 @@ run <- function(alpha.scc, alpha.spike, alpha.revenue, alpha.production, elastic
        alpha.revenue=alpha.revenue, alpha.production=alpha.production, 
        elasticity=elasticity, i=i)
 }
+# system.time( ans.1 <- run(50, 1, 1, 1, -0.5, 1) )
+# 1 load group, ramp=5, 4.86 m
+# 1 load group, ramp=3, 4.72 m
+# 5 load groups, ramp=0.5, 16.1 m but several had very negative contributions
+#"Equilibrium Pc 17.2936151161634"
+#[1] "Southern Co Contribution: 24102007.8825073 pc.minus 16.2334838107649"
+#                                6895865.38476181
 
 # Simple function to checkpoint data out to S3 storage
 save_data <- function(ans, i) {
@@ -164,7 +173,7 @@ for (count in 1:20) {
 
 #### Diagnostic plots for Government Welfare #####
 pc.seq <- seq(0,100,length=50)
-industry <- makeNercIndustry(pd, load.data, elasticity=-1, owner.column=owner.column)
+industry <- makeNercIndustry(pd, load.data, load.groups, elasticity=-1, ramp=3, owner.column=owner.column)
 
 makeIndustryDiagnosticPlots(industry, gov, all.lobbies, pc.seq=pc.seq)
 
@@ -208,52 +217,44 @@ for (i in 1:4) {
 
 
 ### Debugging code
-#p.clear <- lapply(pc.seq, industry$clearingPrices)
-#outcome <- mapply(function(x,y) as.numeric(industry$sectorSegmentSupply(x,y)), p.clear, pc.seq)
-#
-#sum(sapply(1:length(p.0), function(i) 
-#              sum(p.0[[i]]*
-#              (industry$no.tax.values$supply[[i]]-industry$sectorSegmentSupply(p.clear[[50]], pc=100)[[i]]))))
 
-
-
-
-
-
-# Splits the load curve up into 4 groupings, with small ranges on the ends
-#load.groups <- c(0, seq(0.01,0.98,length=3), 1)
-load.groups <- c(0, 1) # one load segment
-t.weights <- load.groups[-1]-load.groups[-length(load.groups)]
-
-
-all.region <- unique(pd$NERC)
-all.region <- all.region[all.region != 'ASCC' & all.region !='HICC']
-pd.region <- list()
-loadCurve <- list()
-region.names <- list()
-generation <- list()
-averages <- list()
-industry <- list()
-for (region in all.region) {
-  pd.region[[region]] <- subset(pd, NERC==region)
-  generation[[region]] <- sum(pd.region[[region]]$NetGeneration)
-  loadCurve[[region]] <- generateLoadDurationCurve(subset(load.data, Region=='AVG'), generation[[region]], check.plots=F)
+{ # This debugging code was used to look at different ramp rates and rough.pc ranges and densities
+  # I've settled on ramp=3 rather than 5, and 100 points going from 0-150
   
-  averages[[region]] <- findAverageLoads(loadCurve[[region]], load.groups)
-  region.names[[region]] <- paste(region, load.groups[-length(load.groups)], load.groups[-1])
-  dev.new(); print(plotLoadDurationCurve(loadCurve[[region]], load.groups, averages[[region]]) + ggtitle(paste("Load Duration Curve",region)))
+  pd <- getPlantData("New_Plant_Data.csv")
+  pc.seq <- seq(0,100,length=50)
+  all.lobbies <- exclude(unique(pd$ParentPAC), c('None','American Public Power Assn','Edison Electric Institute'))
+  load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","#N/A","?"), stringsAsFactors=FALSE)
+  load.groups <- c(0, 1) # one load segment
   
-  sectors <- lapply(1:length(t.weights), function(i) {
-    sub.demand <- ceDemand(e=-0.2, pd.region[[region]], ini.supply=averages[[region]][i])
-    makeLoadSegment(pd.region[[region]][owner.column], pd.region[[region]], sub.demand, 
-                    name=region.names[[region]][i], ramp=5 )
-  })
-  industry[[region]] <- assembleSector(sectors, t.weights)
+  industry <- makeNercIndustry(pd, load.data, load.groups, elasticity=-0.8, ramp=0.5, owner.column='ParentPAC')
+  gov <- componentGov(weights=c(50,1,1,1))
+  
+  n <- length(industry$sectors)
+  
+  welfare <- function(pc) {
+    # The first two lines take the bulk of the time.
+    p.list <- industry$clearingPrices(pc)
+    lobby.profit <- sum(unlist(industry$profitByOwners(p.list, pc, all.lobbies)))
+    lobby.profit + gov(pc, industry, p.list)
+  }
+  
+  # I've hard coded in an upper bound of 50. EXAMINE THIS DECISION AGAIN!
+  eps <- 0
+  max.pc <- 150
+  rough.pc <- seq(eps, max.pc-eps, length=100) # Tried 1000, didn't improve results much
+  rough.welfare <- sapply(rough.pc, welfare)
+  plot(rough.pc, rough.welfare)
+  
+  rough.pc.max.i <- which.max(rough.welfare)
+  lbound <- rough.pc[max(1, rough.pc.max.i-1)]
+  ubound <- rough.pc[min(length(rough.pc), rough.pc.max.i+1)]
+  init.val <- mean(c(lbound, ubound))
+  
+  lobbied.pc <- optim(init.val, welfare, 
+                      method='Brent', lower=lbound, upper=ubound, 
+                      control=list(fnscale=-1, reltol=1e-12))
+  abline(v=lobbied.pc$par)
+  lobbied.pc$par
+  
 }
-
-gov <- componentGov(weights=c(1,1,1,1))
-system.time( cont.pac.ramp5 <- calcAggContributions(industry, all.lobbies, gov) )
-
-write.table(unlist(cont.pac.ramp5$contributions), "clipboard", sep="\t")
-unlist(cont.pac.ramp5$contributions)
-cont.pac.ramp5$pc.eqbm 
