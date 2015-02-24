@@ -160,7 +160,9 @@ hist(all.c)
 #   Are results better than netgeneration by iteslf?
 # Look at contributions as a percent of revenue and/or profit
 # Need to show how the 'ramp' parameter affects the welfare plots
-
+# Think about using a cluster analysis tool (not PRIM...) to find those sets of cases that result in
+# plausible outcomes
+# Look at lobby's as fuel types, but only include firms that have a lobby
 
 #### Redo Notes
 

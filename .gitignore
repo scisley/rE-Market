@@ -1,1 +1,4 @@
 *.Rhistory
+*.docx
+*.RData
+data/

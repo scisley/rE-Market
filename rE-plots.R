@@ -3,6 +3,8 @@ require(ggplot2)
 require(reshape)
 library(scales)
 
+# These are functions to help with general purpose plotting for the rE-market simulation
+
 makeIndustryDiagnosticPlots <- function(industry, gov, lobbies, pc.seq=seq(0, 50, length=200), 
            p.clear=NULL, supply.pc.list=seq(0,100,20)) {
   if (is.null(p.clear)) p.clear <- lapply(pc.seq, industry[['clearingPrices']])

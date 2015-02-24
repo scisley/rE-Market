@@ -443,7 +443,9 @@ calcAggContributions <- function(industry, lobby.names, gov) {
 
 # rough.pc determines the points where the welfare is initially evaluated. The highest point
 # and its neighbors are then used as the starting point and limits for a Brent optimization.
-aggNegotiate <- function(industry, lobbyers, gov, rough.pc = seq(0, 150, length=100)) { 
+# The default rough pc range should be fairly good for weights between 0 and 5. Those that
+# go past 100 would go past 150. default is seq(0, 100, length=100)
+aggNegotiate <- function(industry, lobbyers, gov, rough.pc = seq(0, 250, length=250)) { 
 
   n <- length(industry$sectors)
 
