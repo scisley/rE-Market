@@ -374,16 +374,11 @@ assembleIndustry <- function(sectors, name='Industry', pc.precalc=seq(0, 150, 0.
   # Precalculate the clearing prices for the list of precalculated carbon prices
   p.precalc <- lapply(pc.precalc, clearingPrices)
   
-  ### Need to precompute profits to speed things up.
-  profit.precalc <- lapply(1:length(pc.precalc), function(i) {
-    profitByOwners(p.precalc[[i]], pc.precalc[i], owner.names)
-  })
-  
   return(list(sectors=sectors, sector.weights=sector.weights,
               clearingPrices=clearingPrices,
               clearingPrice=clearingPrice,
               sectorProfits=sectorProfits,
-              pc.precalc=pc.precalc, p.precalc=p.precalc, profit.precalc=profit.precalc,
+              pc.precalc=pc.precalc, p.precalc=p.precalc,
               sectorSegmentProfits=sectorSegmentProfits,
               profit=profit, emissions=emissions, supply=supply,
               revenue=revenue,

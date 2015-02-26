@@ -26,7 +26,17 @@ options(digits=10)
 pd <- getPlantData("New_Plant_Data.csv")
 load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","#N/A","?"), stringsAsFactors=FALSE)
 
-## Make plot of a large firm's profit for different numbers of load groups.
+
+#########################################################################################
+# Make plot of a large firm's profit for different numbers of load groups. Look at
+# how this varies with the ramp rate.
+#
+# Conclusions: The number of load groups is critical! Plotting the profit for a single
+# company for various load groups can show massive swings from 3 to 5 groups, things look
+# like the settle down after 40 (40 and 60 are very similar) but it could still be improved.
+# The ramp rate still needs to be investigated. One might be able to get away with fewer
+# load groups if the ramp rate is slighly above zero.
+#########################################################################################
 
 ramp.level <- 0
 elasticity <- -0.5
@@ -83,13 +93,42 @@ result[["cont"]] <- cont.x
 
 
 
+#########################################################################################
+# Testing new industry option with pre-calculated clearing prices
+#########################################################################################
+pd <- getPlantData("New_Plant_Data.csv")
+industry <- makeNercIndustry(pd=pd, 
+                             load.data=read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","#N/A","?"), stringsAsFactors=FALSE),
+                             load.groups=c(0, seq(0.01,0.98,length=49), 1),
+                             elasticity=-0.5,
+                             ramp=0.5,
+                             owner.column='Fuel',
+                             pc.precalc=seq(0, 150, 5))
 
+## 170s using 150 rough pc's and 4 load groups
+## 315s using 300 rough pc's and 4 load groups
+## 168s using 50 rough pc's and 12 load groups
+## using 50 rough pc's and 50 load groups
+system.time( cont.x <- calcAggContributions(industry, 
+                                            lobby.names=unique(pd$Fuel), 
+                                            gov=componentGov(weights=c(50,1,1,0)),
+                                            rough.pc=seq(0, 150, 5)) ) 
 
+## 73s,  2.3x faster than original using 150 rough pc's and 4 load groups
+## 119s, 2.6x faster than original using 300 rough pc's and 4 load groups
+## 108s, 1.5x faster than original using 50 rough pc's and 12 load groups
+## using 50 rough pc's and 50 load groups
+system.time( cont.x <- calcAggContributions1(industry, 
+                                             lobby.names=unique(pd$Fuel), 
+                                             gov=componentGov(weights=c(50,1,1,0))) )
 
-
-
-
-
+## 41s, 4.2x faster than original using 150 rough pc's and 4 load groups
+## 53s, 5.8x faster than original using 300 rough pc's and 4 load groups
+## 89x, 1.9x faster than original using 300 rough pc's and 4 load groups
+## using 50 rough pc's and 50 load groups
+system.time( cont.x <- calcAggContributions2(industry, 
+                                             lobby.names=unique(pd$Fuel), 
+                                             gov=componentGov(weights=c(50,1,1,0))) )
 
 
 
