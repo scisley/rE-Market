@@ -3,32 +3,97 @@ require(ggplot2)
 require(ggthemes)
 require(reshape)
 require(parallel)
-require(tgp)
-
-# TODO:
-#  * DONE. Make name, push to git. rE-Market
-#  * DONE. Implement 4 component government welfare function
-#  * Find somebody at NREL to talk with about who can profit from a carbon tax
-#  * DONE. Test welfare function
-#  * Examine how much nuclear and hydro can take advantage of market prices (IPP's?)
-#  * Learn multi-core package
-#  * Do large LHC experiment using AWS big computer
-#  * Make a new dispatch curve with histograms/kernels underneath for fuel types for b/w readers
-
-#  * Make a profit by plant map and export the data for viewing in javascript
+require(plyr)
+# I need to explore ways to speed up the process. Right now, it is taking way too long, especially if
+# I have to increase the number of load groups dramatically. 
 
 # Remember traceback!  Helps with debugging!
 theme_set(theme_gdocs())
 theme_update(plot.background = element_blank()) #, text = element_text(size=14))
 #theme_update(legend.key.width=unit(3,"lines"))
 
-setwd("C:\\Users\\sisley\\Documents\\RAND\\Thesis\\Empirical\\rE-market")
+setwd("~/RAND/Thesis/Empirical/rE-market")
 source('rE-support.R')
 source('rE-plots.R')
+source('rE-lobbying.R')
 options(digits=10)
 
 # Bucket to put the final file
-s3.bucket <- 's3://isley-model-results/'
+#s3.bucket <- 's3://isley-model-results/'
+
+######################### ANALYSIS ###########################
+
+pd <- getPlantData("New_Plant_Data.csv")
+load.data <- read.csv('Load_Curve_Data.csv', header=TRUE, na.strings = c("N/A","#N/A","?"), stringsAsFactors=FALSE)
+
+## Make plot of a large firm's profit for different numbers of load groups.
+
+ramp.level <- 0
+elasticity <- -0.5
+pc.range = 1:150
+
+# Sum up the netgeneration for each firm
+firm.data <- ddply(pd, "ParentPAC", function(firm) {
+  data.frame(NetGeneration=sum(firm$NetGeneration))
+})
+firm.data <- firm.data[order(-firm.data$NetGeneration),]
+
+# Select the largest 15 and smallest 5 for more analysis
+#firm.names <- c(firm.data[1:15,"ParentPAC"], firm.data[65:70,"ParentPAC"])
+firm.names <- firm.data$ParentPAC
+
+load.resolutions <- c(1,3,8,18,38,58)
+results <- lapply(load.resolutions, function(res) { 
+  
+  print(paste("Starting",res))
+  
+  load.groups <- c(0, seq(0.01,0.98,length=res), 1)
+  industry <- makeNercIndustry(pd, load.data, load.groups, elasticity, ramp=ramp.level, owner.column='ParentPAC')
+  
+  profits <- lapply(pc.range, function(x) {
+    clearing.prices <- industry$clearingPrices(pc=x)
+    
+    d <- lapply(firm.names, function(firm) {
+      data.frame(profit=unlist(industry$profitByOwners(clearing.prices, pc=x, firm)),
+                 firm=firm,
+                 res=res+2,
+                 pc=x)
+    })
+    return(rbind.fill(d))
+  })
+  
+  return(rbind.fill(profits))
+})
+
+d <- rbind.fill(results)
+
+d_ply(d, "firm", function(x) {
+  print( 
+    ggplot(x, aes(x=pc, y=profit)) + geom_line(aes(color=as.factor(res))) + ggtitle(x$firm)
+    )
+})
+
+#script <- readLines("rE-market-fast.R", n=-1)
+#save(d, script, file="load-group-exploration-r0.RData")
+
+
+
+system.time( cont.x <- calcAggContributions(industry, all.lobbies, gov) ) 
+result[["cont"]] <- cont.x
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ######################### ANALYSIS ###########################
 

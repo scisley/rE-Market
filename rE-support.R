@@ -3,18 +3,12 @@ require(ggplot2)
 require(reshape)
 
 ########### NOTES ###############
-# I can make simplified versions of each firm that just include a single power plant for each fuel
-# type. This would be vastly easier to solve, and not have so many discontinuities in the profit 
-# function.
-
+#
 # Given that I have estimates for the profit functions, I should be able to find a structural equation
 # that relates contributions to some value of the underlying parameters, and then test this 
 # econometrically. Some statement like, 'firms that look like this should contribute more/less than ...'
-
+#
 ######################### DATA CLEANING ###########################
-
-## Now I need to incorporate the region and maybe even a load curve.
-## Or should it be load curve, then region?
 
 getPlantData <- function(file.name) {
   # Read in the parameter ranges
@@ -34,10 +28,6 @@ getPlantData <- function(file.name) {
   gas.var.costs <- 4.74 # $/mmBtu2009 national average for electricity production (http://www.eia.gov/electricity/annual/html/epa_07_04.html)
   oil.var.costs <- 7.02 # $/mmBtu http://www.eia.gov/electricity/annual/html/epa_07_04.html
   
-  #oil.var.costs <- (8.49+11.63+10.45)/3 #$/mmBtu (Newcomer and Apt)
-  #gas.var.costs <- (9.95+10.52+7.79)/3 #$/mmBtu (Newcomer and Apt)
-  #coal.var.costs <- (1.73+1.41+1.29)/3 #$/mmBtu (Newcomer and Apt)
-  
   # By final output
   nuclear.var.costs <- 16.5 # $/MWh (Newcomer and Apt), would be nicer to have more resolution here
   wind.var.costs <- 20 # $/MWh (Newcomer and Apt)
@@ -45,10 +35,6 @@ getPlantData <- function(file.name) {
   geothermal.var.costs <- 13.69 # CRS Power Plants Characteristics and Costs, Table 4
   solar.var.costs <- 13.71 # CRS Power Plants Characteristics and Costs, Table 4
 
-  # Maximum utilization rates, ***guesses*** from wikipedia and my head
-  # Better answer for wind is 0.35, see http://www.ceere.org/rerl/about_wind/RERL_Fact_Sheet_2a_Capacity_Factor.pdf pg 27
-  # Nuclear, 90.3%, http://www.nei.org/Knowledge-Center/Nuclear-Statistics/US-Nuclear-Power-Plants/US-Nuclear-Capacity-Factors
-  
   # http://www.eia.gov/electricity/annual/archive/03482009.pdf, table 5.2. These are actual capacity factors
   # and should not be used for plants that will likely gain operation due to dispatch order changes. 
   # Nuclear, 90.3%; Hydroelectric, 39.8%; 
@@ -56,11 +42,6 @@ getPlantData <- function(file.name) {
   util <-        c(0.85     ,0.85  ,0.85 ,0.85 ,0.93      ,0.35 ,0.5    ,0.85         ,0.2)
   names(util) <- c('BIOMASS','COAL','GAS','OIL','NUCLEAR','WIND','HYDRO','GEOTHERMAL','SOLAR')
   plant.data$MaxGeneration <- plant.data$Capacity*util[as.character(plant.data$Fuel)]*8760
-  
-  # TODO: Calculate the capacity factor of the top 10% of realized capacity factor for each fuel type. I might
-  # be able to assume that these are 'top' performers that are only down for maintence and other issues.
-  # Maybe go by the top 10 biggest? Those plants are likely to work a lot. Hard to figure out hydro. What about
-  # using the actual value if its higher than the assumed value?
   
   plant.data$VarCosts <- NA
 
@@ -139,7 +120,7 @@ findAverageLoads <- function(loadCurve, load.groups) {
 ## For the given set of plants, create an object that returns a list saying production, emissions, 
 ## and profit for any price p and carbon price pc. The ramp is the price needed to go from zero 
 ## production to full production. It helps smooth out curves.
-createPlantFunction <- function(plants, ramp=0.1) {
+createPlantFunction <- function(plants, ramp=0.5) {
   force(plants)
   supplyVector <- function(p, pc) {
     marginal.cost <- plants$VarCosts + plants$CO2Intensity*pc
@@ -391,127 +372,57 @@ assembleIndustry <- function(sectors, name='Industry') {
               profitByOwners=profitByOwners,
               name=name,
               demand=demand,
-              sector.count <- n,
+              sector.count=n,
               no.tax.values=no.tax.values))
 }
 
-# Industry is an object, NOT a list of sectors
-calcAggContributions <- function(industry, lobby.names, gov) {
-
-  pc.minus <- list()
-  eqbm.profits <- list()
-  contributions <- list()
-  other.data <- list()
-  n <- length(industry$sectors)
+# Returns an industry object based on the NERC regions, minus Alaska and Hawaii
+makeNercIndustry <- function(pd, load.data, load.groups = c(0,1), elasticity=-1, ramp=0.5, owner.column='ParentPAC') {
   
-  # Need the 'overall' equilibrium negotiated price to start with for each sector
-  pc.eqbm <- aggNegotiate(industry, lobby.names, gov)
-  p.eqbm <- industry$clearingPrices(pc.eqbm)
-  
-  print(paste("Equilibrium Pc", pc.eqbm))
-
-  # Equilibrium profits for each lobby
-  eqbm.profits <- industry$profitByOwners(p.eqbm, pc.eqbm, lobby.names) 
-  total.eqbm.profits <- sum(unlist(eqbm.profits))
-  # Calculate pc.minus for each owner
-  for(lobby in lobby.names) {
-    sub.names <- lobby.names[lobby.names!=lobby]
-    pc <- aggNegotiate(industry, sub.names, gov)
-    pc.minus[[lobby]] <- pc
-    p.minus <- industry$clearingPrices(pc)    
-    profit.minus <- industry$profitByOwners(p.minus, pc, sub.names) 
+  t.weights <- load.groups[-1]-load.groups[-length(load.groups)]
+  nerc.regions <- unique(pd$NERC)
+  nerc.regions <- nerc.regions[nerc.regions != 'ASCC' & nerc.regions !='HICC']
+  pd.nerc <- list()
+  loadCurve <- list()
+  nerc.names <- list()
+  generation <- list()
+  averages <- list()
+  sectors <- list()
+  for (nerc in nerc.regions) {
+    pd.nerc[[nerc]] <- subset(pd, NERC==nerc)
+    generation[[nerc]] <- sum(pd.nerc[[nerc]]$NetGeneration)
+    loadCurve[[nerc]] <- generateLoadDurationCurve(subset(load.data, Region=='AVG'), generation[[nerc]], check.plots=F)
     
-    other.profit.at.eqbm <- total.eqbm.profits - eqbm.profits[[lobby]]
-    other.profit.at.pc.minus <- sum(unlist(profit.minus))
-    change.in.gov.welfare <- gov(pc, industry, p.minus) - gov(pc.eqbm, industry, p.eqbm)
-    contributions[[lobby]] <- other.profit.at.pc.minus - other.profit.at.eqbm + change.in.gov.welfare
+    averages[[nerc]] <- findAverageLoads(loadCurve[[nerc]], load.groups)
+    nerc.names[[nerc]] <- paste(nerc, load.groups[-length(load.groups)], load.groups[-1])
     
-    other.data[[lobby]] <- list(other.profit.at.pc.minus=other.profit.at.pc.minus,
-                                other.profit.at.eqbm=other.profit.at.eqbm,
-                                change.in.gov.welfare=change.in.gov.welfare)
-    print(paste(lobby,"Contribution:",contributions[[lobby]],"pc.minus",pc))
+    load.segments <- lapply(1:length(t.weights), function(i) {
+      sub.demand <- ceDemand(e=elasticity, pd.nerc[[nerc]], ini.supply=averages[[nerc]][i])
+      makeLoadSegment(pd.nerc[[nerc]][owner.column], pd.nerc[[nerc]], sub.demand, 
+                      name=nerc.names[[nerc]][i], ramp=ramp )
+    })
+    sectors[[nerc]] <- assembleSector(load.segments, t.weights, name=paste(nerc,'Sector'))
   }
-  
-  return(list(contributions = contributions,
-              pc.minus = pc.minus,
-              pc.eqbm = pc.eqbm,
-              p.eqbm = p.eqbm,
-              eqbm.profits = eqbm.profits,
-              other.data = other.data))
-  
+  assembleIndustry(sectors)
 }
 
-# rough.pc determines the points where the welfare is initially evaluated. The highest point
-# and its neighbors are then used as the starting point and limits for a Brent optimization.
-# The default rough pc range should be fairly good for weights between 0 and 5. Those that
-# go past 100 would go past 150. default is seq(0, 100, length=100)
-aggNegotiate <- function(industry, lobbyers, gov, rough.pc = seq(0, 250, length=250)) { 
-
-  n <- length(industry$sectors)
-
-  welfare <- function(pc) {
-    # The first two lines take the bulk of the time.
-    p.list <- industry$clearingPrices(pc)
-    lobby.profit <- sum(unlist(industry$profitByOwners(p.list, pc, lobbyers)))
-    lobby.profit + gov(pc, industry, p.list)
-  }
+# NOT USED...
+makeSingleIndustry <- function(pd, load.data, elasticity, ramp, load.groups=c(0,1)) {
+  t.weights <- load.groups[-1]-load.groups[-length(load.groups)]
+  generation <- sum(pd$NetGeneration)
+  loadCurve <- generateLoadDurationCurve(subset(load.data, Region=='AVG'), generation, check.plots=F)
+  averages <- findAverageLoads(loadCurve, load.groups)
   
-  #rough.pc <- seq(search.range[1], search.range[2], length=ini.density) # Tried 1000, didn't improve results much
-  rough.welfare <- sapply(rough.pc, welfare)
-  rough.pc.max.i <- which.max(rough.welfare)
-  lbound <- rough.pc[max(1, rough.pc.max.i-1)]
-  ubound <- rough.pc[min(length(rough.pc), rough.pc.max.i+1)]
-  init.val <- mean(c(lbound, ubound))
+  demand <- ceDemand(e=elasticity, pd, ini.supply=averages)
+  lg.names <- paste('LG', load.groups[-length(load.groups)], load.groups[-1])
+  load.segments <- lapply(1:length(t.weights), function(i) {
+    sub.demand <- ceDemand(e=elasticity, pd, ini.supply=averages[i])
+    makeLoadSegment(pd['ParentPAC'], pd, sub.demand, 
+                    name=lg.names[i], ramp=ramp )
+  })
   
-  lobbied.pc <- optim(init.val, welfare, 
-                    method='Brent', lower=lbound, upper=ubound, 
-                    control=list(fnscale=-1, reltol=1e-12))
-  
-  # Double check if the welfare at zero is higher.
-  if (welfare(0) > lobbied.pc$value)
-    return(0)
-  else
-    return(lobbied.pc$par)
-}
-
-## Updated to include price spikes, revenue, emissions, and production losses
-#componentGov <- function(scc, weight) {
-componentGov <- function(weights) {
-  scc <- weights[1]
-  spike.weight <- weights[2]
-  revenue.weight <- weights[3]
-  production.weight <- weights[4]
-  
-  # The p.list is provided so that the government can quickly calculate anything else
-  # it needs, rather than recomputing it, which can be very expensive. 
-  function(pc, industry, p.list) {
-    p.0 <- industry$no.tax.values$price # pre-computed, no penalty
-    s.0 <- industry$no.tax.values$supply # pre-computed, no penalty
-    t.w <- industry$sector.weights
-    s   <- industry$sectorSegmentSupply(p.list, pc)
-    
-    emissions <- industry$emissions(p.list, pc)
-    revenue <- emissions*pc
-    
-    spike.loss <- calcSpikeLoss(p.0, p.list, s.0)
-    production.loss <- calcProductionLoss(p.0, s, s.0)
-    return(-scc*emissions + revenue.weight*revenue
-           -spike.weight*spike.loss - production.weight*production.loss)
-  }
-
-}
-
-calcProductionLoss <- function(p.0, s, s.0) {
-  # Looks weird, for each sector i, find revenue lost by industry due to the carbon price
-  # and add it all up. The interior sum is over load segments, the outer sum is over sectors.
-  sum(sapply(1:length(p.0), function(i) sum(p.0[[i]]*(s.0[[i]]-s[[i]]))))
-  #return(0)
-}
-
-calcSpikeLoss <- function(p.0, p, s.0) {
-  # Looks weird, for each sector i, find extra money spent to buy original amount
-  # and add it all up. The interior sum is over load segments, the outer sum is over sectors.
-  sum(sapply(1:length(p.0), function(i) sum(s.0[[i]]*(p[[i]]-p.0[[i]]))))
+  sector <- assembleSector(load.segments, t.weights=1, name='single sector')
+  industry <- assembleIndustry(list(sector), name='Entire US')
 }
 
 # Returns a constant elasticity function using the supplied e and either a utilization
@@ -536,53 +447,6 @@ exclude <- function(char.vect, drop) {
   char.vect[!char.vect %in% drop]
 }
 
-# Returns an industry object based on the NERC regions, minus Alaska and Hawaii
-makeNercIndustry <- function(pd, load.data, load.groups = c(0,1), elasticity=-1, ramp=0.5, owner.column='ParentPAC') {
-  
-  t.weights <- load.groups[-1]-load.groups[-length(load.groups)]
-  nerc.regions <- unique(pd$NERC)
-  nerc.regions <- nerc.regions[nerc.regions != 'ASCC' & nerc.regions !='HICC']
-  pd.nerc <- list()
-  loadCurve <- list()
-  nerc.names <- list()
-  generation <- list()
-  averages <- list()
-  sectors <- list()
-  for (nerc in nerc.regions) {
-    pd.nerc[[nerc]] <- subset(pd, NERC==nerc)
-    generation[[nerc]] <- sum(pd.nerc[[nerc]]$NetGeneration)
-    loadCurve[[nerc]] <- generateLoadDurationCurve(subset(load.data, Region=='AVG'), generation[[nerc]], check.plots=F)
-    
-    averages[[nerc]] <- findAverageLoads(loadCurve[[nerc]], load.groups)
-    nerc.names[[nerc]] <- paste(nerc, load.groups[-length(load.groups)], load.groups[-1])
-
-    load.segments <- lapply(1:length(t.weights), function(i) {
-      sub.demand <- ceDemand(e=elasticity, pd.nerc[[nerc]], ini.supply=averages[[nerc]][i])
-      makeLoadSegment(pd.nerc[[nerc]][owner.column], pd.nerc[[nerc]], sub.demand, 
-                      name=nerc.names[[nerc]][i], ramp=ramp )
-    })
-    sectors[[nerc]] <- assembleSector(load.segments, t.weights, name=paste(nerc,'Sector'))
-  }
-  assembleIndustry(sectors)
-}
-
-makeSingleIndustry <- function(pd, load.data, elasticity, ramp, load.groups=c(0,1)) {
-  t.weights <- load.groups[-1]-load.groups[-length(load.groups)]
-  generation <- sum(pd$NetGeneration)
-  loadCurve <- generateLoadDurationCurve(subset(load.data, Region=='AVG'), generation, check.plots=F)
-  averages <- findAverageLoads(loadCurve, load.groups)
-
-  demand <- ceDemand(e=elasticity, pd, ini.supply=averages)
-  lg.names <- paste('LG', load.groups[-length(load.groups)], load.groups[-1])
-  load.segments <- lapply(1:length(t.weights), function(i) {
-      sub.demand <- ceDemand(e=elasticity, pd, ini.supply=averages[i])
-      makeLoadSegment(pd['ParentPAC'], pd, sub.demand, 
-                      name=lg.names[i], ramp=ramp )
-    })
-  
-  sector <- assembleSector(load.segments, t.weights=1, name='single sector')
-  industry <- assembleIndustry(list(sector), name='Entire US')
-}
 
 
 
